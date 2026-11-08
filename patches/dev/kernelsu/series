@@ -1,3 +1,4 @@
 0001-par-linux-4.9-compat.patch
 0002-par-sucompat-hide-from-unapproved-uids.patch
 0003-par-allowlist-fscrypt-keyrings.patch
+0004-par-manager-signature.patch

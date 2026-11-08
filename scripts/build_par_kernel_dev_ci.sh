@@ -185,7 +185,7 @@ host)
 docker)
 image_tag="par-kernel-dev:${GITHUB_RUN_ID:-local}-${selinux_mode}"
 docker build \
-  --build-arg "BASE_IMAGE=${BASE_IMAGE:-ubuntu:26.04}" \
+  --build-arg "BASE_IMAGE=${BASE_IMAGE:-ubuntu:24.04}" \
   --build-arg "USER_ID=$(id -u)" \
   --build-arg "GROUP_ID=$(id -g)" \
   -t "$image_tag" \
