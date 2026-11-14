@@ -6,10 +6,11 @@ HarmonyOS source imports. The target is AlphaDroid Android 13 with the current
 PAR EMUI 9.1 vendor/firmware. Initial device checks passed for boot, WPA2 Wi-Fi, root and authorization persistence;
 automatic reboot and broader hardware validation remain outstanding.
 
-This repository is a fork of
-[yukino1111/android_kernel_huawei_par_sukisu_patches](https://github.com/yukino1111/android_kernel_huawei_par_sukisu_patches).
-This branch independently rebases its original EMUI 9.0 feature builder
-([`4444781`](https://github.com/yukino1111/android_kernel_huawei_par_sukisu_patches/commit/4444781)) onto Mashopy `5208809c3fb8faa74ba07abff32015ff69d3b7f3`. It
+This repository (`9.1-ksu-releasekey` branch) is a fork of
+[whistooy/android_kernel_huawei_par_sukisu_patches](https://github.com/whistooy/android_kernel_huawei_par_sukisu_patches),
+which independently rebased the original EMUI 9.0 feature builder
+([`4444781`](https://github.com/yukino1111/android_kernel_huawei_par/commit/4444781))
+onto Mashopy `5208809c3fb8faa74ba07abff32015ff69d3b7f3`. It
 keeps the original pinned KernelSU and SuSFS 2.3.0 dependencies; Antigravity
 9.1 and KernelSU-Next trees are references only. KPM is disabled. See
 [the source comparison and migration report](docs/UPSTREAM-REBASE.md).
@@ -132,7 +133,8 @@ their original terms, including the separate SuSFS GPL-3.0-or-later scope; see
 
 ## Acknowledgements
 
-- [yukino1111/android_kernel_huawei_par_sukisu_patches](https://github.com/yukino1111/android_kernel_huawei_par_sukisu_patches) — original PAR patch repository, feature integration and build workflow forming the basis of this fork.
+- [whistooy/android_kernel_huawei_par_sukisu_patches](https://github.com/whistooy/android_kernel_huawei_par_sukisu_patches) — upstream EMUI 9.1 rebase and build workflow fork source.
+- [yukino1111/android_kernel_huawei_par](https://github.com/yukino1111/android_kernel_huawei_par) — original PAR patch repository (`4444781`), feature integration and build workflow.
 - [Mashopy/android_kernel_huawei_kirin970](https://github.com/Mashopy/android_kernel_huawei_kirin970)
 - [LineageOS/android_kernel_huawei_kirin970](https://github.com/LineageOS/android_kernel_huawei_kirin970)
 - [SukiSU Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra)
