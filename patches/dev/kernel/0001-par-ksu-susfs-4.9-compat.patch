@@ -1,3 +1,50 @@
+diff --git a/block/ioprio.c b/block/ioprio.c
+index 01b811629..d8aafdf30 100644
+--- a/block/ioprio.c
++++ b/block/ioprio.c
+@@ -58,6 +58,10 @@ int set_task_ioprio(struct task_struct *task, int ioprio)
+ }
+ EXPORT_SYMBOL_GPL(set_task_ioprio);
+ 
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
++extern bool susfs_is_priority_uid_filtered(uid_t uid);
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
++
+ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
+ {
+ 	int class = IOPRIO_PRIO_CLASS(ioprio);
+@@ -117,7 +121,15 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
+ 			if (!who)
+ 				user = current_user();
+ 			else
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
++			{
++				if (current_uid().val >= 10000 && susfs_is_priority_uid_filtered(uid.val))
++					break;
++				user = find_user(uid);
++			}
++#else
+ 				user = find_user(uid);
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+ 
+ 			if (!user)
+ 				break;
+@@ -217,7 +229,15 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
+ 			if (!who)
+ 				user = current_user();
+ 			else
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
++			{
++				if (current_uid().val >= 10000 && susfs_is_priority_uid_filtered(uid.val))
++					break;
++				user = find_user(uid);
++			}
++#else
+ 				user = find_user(uid);
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+ 
+ 			if (!user)
+ 				break;
 diff --git a/drivers/input/input.c b/drivers/input/input.c
 index b970b8e70..ca28ff42d 100644
 --- a/drivers/input/input.c
@@ -47,6 +94,33 @@ index c4c08a9f5..0c3eb41ac 100644
  {
  	int retval;
  	struct nameidata nd;
+diff --git a/fs/namespace.c b/fs/namespace.c
+index 72035f7c1..bfcd9ff61 100644
+--- a/fs/namespace.c
++++ b/fs/namespace.c
+@@ -3744,6 +3744,9 @@ int susfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt) {
+ 	struct mount *mnt = orig_mnt;
+ 	int mnt_id;
+ 
++	if (mnt->mnt_id < DEFAULT_KSU_MNT_ID)
++		return mnt->mnt_id;
++
+ 	lock_mount_hash();
+ 	for (; mnt && mnt->mnt_parent && mnt != mnt->mnt_parent && mnt->mnt_id >= DEFAULT_KSU_MNT_ID; mnt = mnt->mnt_parent) { }
+ 	mnt_id = mnt->mnt_id;
+@@ -3755,6 +3758,12 @@ int susfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt) {
+ struct vfsmount *susfs_get_non_sus_vfsmnt_from_vfsmnt(struct vfsmount *vfsmnt) {
+ 	struct mount *mnt = real_mount(vfsmnt);
+ 
++	if (mnt->mnt_id < DEFAULT_KSU_MNT_ID) {
++		mntget(&mnt->mnt);
++		dget(mnt->mnt.mnt_root);
++		return &mnt->mnt;
++	}
++
+ 	lock_mount_hash();
+ 	for (; mnt && mnt->mnt_parent && mnt != mnt->mnt_parent && mnt->mnt_id >= DEFAULT_KSU_MNT_ID; mnt = mnt->mnt_parent) { }
+ 	mntget(&mnt->mnt);
 diff --git a/fs/open.c b/fs/open.c
 index 477546988..71a97beb7 100644
 --- a/fs/open.c
@@ -221,7 +295,7 @@ index 62cbc1396..52b44444d 100644
  		goto out;
  
 diff --git a/fs/statfs.c b/fs/statfs.c
-index 8efec342f..545c13997 100644
+index 8efec342f..4e7281c41 100644
 --- a/fs/statfs.c
 +++ b/fs/statfs.c
 @@ -7,7 +7,7 @@
@@ -233,7 +307,7 @@ index 8efec342f..545c13997 100644
  #include <linux/susfs_def.h>
  #endif
  #include "internal.h"
-@@ -66,27 +66,52 @@ static int statfs_by_dentry(struct dentry *dentry, struct kstatfs *buf)
+@@ -66,27 +66,64 @@ static int statfs_by_dentry(struct dentry *dentry, struct kstatfs *buf)
  	return retval;
  }
  
@@ -242,8 +316,18 @@ index 8efec342f..545c13997 100644
 +extern int susfs_sus_kstat_spoof_vfs_statfs(struct inode *inode,
 +		struct kstatfs *buf, bool *is_fuse);
 +
-+static int susfs_statfs_by_dentry(struct dentry *dentry, struct kstatfs *buf,
-+		bool *is_fuse)
++int statfs_by_dentry_wrapper(struct dentry *dentry, struct kstatfs *buf)
++{
++	return statfs_by_dentry(dentry, buf);
++}
++
++int calculate_f_flags_wrapper(struct vfsmount *mnt)
++{
++	return calculate_f_flags(mnt);
++}
++
++static int susfs_statfs_by_dentry(struct dentry *dentry, struct vfsmount *mnt,
++		struct kstatfs *buf, bool *is_fuse)
 +{
 +	int retval;
 +
@@ -253,12 +337,17 @@ index 8efec342f..545c13997 100644
 +	retval = security_sb_statfs(dentry);
 +	if (retval)
 +		return retval;
-+	retval = susfs_sus_kstat_spoof_vfs_statfs(dentry->d_inode, buf,
-+			is_fuse);
-+	if (retval)
-+		retval = dentry->d_sb->s_op->statfs(dentry, buf);
-+	if (!retval && !buf->f_frsize)
-+		buf->f_frsize = buf->f_bsize;
++	if (!susfs_sus_kstat_spoof_vfs_statfs(dentry->d_inode, buf, is_fuse)) {
++		if (buf->f_frsize == 0)
++			buf->f_frsize = buf->f_bsize;
++		return retval;
++	}
++	retval = dentry->d_sb->s_op->statfs(dentry, buf);
++	if (retval == 0) {
++		buf->f_flags = calculate_f_flags(mnt);
++		if (buf->f_frsize == 0)
++			buf->f_frsize = buf->f_bsize;
++	}
 +	return retval;
 +}
 +#endif
@@ -288,12 +377,9 @@ index 8efec342f..545c13997 100644
 -	if (SUSFS_IS_INODE_OPEN_REDIRECT(inode)) {
 -		if (!susfs_open_redirect_spoof_vfs_statfs(inode, buf))
 -			return 0;
-+		if (susfs_is_inode_sus_kstat(inode, &is_fuse)) {
-+			error = susfs_statfs_by_dentry(path->dentry, buf, &is_fuse);
-+			if (!error)
-+				buf->f_flags = calculate_f_flags(path->mnt);
-+			return error;
-+		}
++		if (susfs_is_inode_sus_kstat(inode, &is_fuse))
++			return susfs_statfs_by_dentry(path->dentry, path->mnt,
++						      buf, &is_fuse);
  	}
  #endif
  #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
@@ -310,11 +396,48 @@ index cf437f56b..a4c758e43 100644
  
  static inline int user_path_at(int dfd, const char __user *name, unsigned flags,
  		 struct path *path)
+diff --git a/kernel/sys.c b/kernel/sys.c
+index a4146cfe4..b4aa25e32 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -182,6 +182,10 @@ static int set_one_prio(struct task_struct *p, int niceval, int error)
+ 	return error;
+ }
+ 
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
++extern bool susfs_is_priority_uid_filtered(uid_t uid);
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
++
+ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
+ {
+ 	struct task_struct *g, *p;
+@@ -227,6 +231,10 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
+ 		if (!who)
+ 			uid = cred->uid;
+ 		else if (!uid_eq(uid, cred->uid)) {
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
++			if (cred->uid.val >= 10000 && susfs_is_priority_uid_filtered(uid.val))
++				goto out_unlock;
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+ 			user = find_user(uid);
+ 			if (!user)
+ 				goto out_unlock;	/* No processes for this user */
+@@ -295,6 +303,10 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
+ 		if (!who)
+ 			uid = cred->uid;
+ 		else if (!uid_eq(uid, cred->uid)) {
++#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
++			if (cred->uid.val >= 10000 && susfs_is_priority_uid_filtered(uid.val))
++				goto out_unlock;
++#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+ 			user = find_user(uid);
+ 			if (!user)
+ 				goto out_unlock;	/* No processes for this user */
 diff --git a/security/selinux/include/objsec.h b/security/selinux/include/objsec.h
-index 78cd34fe8..677ea4fcb 100644
+index 43535cdd4..b5bca546c 100644
 --- a/security/selinux/include/objsec.h
 +++ b/security/selinux/include/objsec.h
-@@ -140,4 +140,14 @@ struct bpf_security_struct {
+@@ -134,4 +134,14 @@ struct bpf_security_struct {
  
  extern unsigned int selinux_checkreqprot;
  

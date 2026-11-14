@@ -1,16 +1,58 @@
 diff --git a/fs/susfs.c b/fs/susfs.c
-index 37ac9b058..7536875d8 100644
+index a33a80939..0a68e964c 100644
 --- a/fs/susfs.c
 +++ b/fs/susfs.c
-@@ -20,6 +20,7 @@
- #include <linux/workqueue.h>
- #include <linux/fsnotify_backend.h>
- #include <linux/jump_label.h>
-+#include <linux/security.h>
+@@ -26,10 +26,49 @@
+ #include <linux/rcupdate.h>
+ #include <linux/string.h>
+ #include <linux/hash.h>
++#include <linux/mm.h>
++#include <linux/vmalloc.h>
  #include <linux/susfs.h>
  #include "fuse/fuse_i.h"
  #include "mount.h"
-@@ -1424,12 +1425,15 @@ static int watch_one_dir(struct watch_dir *wd)
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
++static inline void *susfs_kvmalloc_compat(size_t size, gfp_t flags)
++{
++	void *buf = kmalloc(size, flags | __GFP_NOWARN);
++	if (!buf) {
++		if (flags & __GFP_ZERO)
++			buf = vzalloc(size);
++		else
++			buf = vmalloc(size);
++	}
++	return buf;
++}
++
++static inline void susfs_kvfree_compat(const void *addr)
++{
++	if (is_vmalloc_addr(addr))
++		vfree(addr);
++	else
++		kfree(addr);
++}
++#define kvmalloc susfs_kvmalloc_compat
++#define kvfree susfs_kvfree_compat
++#endif
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
++static inline ssize_t susfs_kernel_read_compat(struct file *file, void *buf,
++					       size_t count, loff_t *pos)
++{
++	loff_t offset = pos ? *pos : 0;
++	ssize_t res = kernel_read(file, offset, (char *)buf, count);
++	if (pos && res > 0)
++		*pos = offset + res;
++	return res;
++}
++#define kernel_read susfs_kernel_read_compat
++#endif
++
+ extern bool susfs_is_current_ksu_domain(void);
+ extern void setup_selinux(const char *domain, struct cred *cred);
+ extern struct cred *ksu_cred;
+@@ -2046,12 +2085,15 @@ static int watch_one_dir(struct watch_dir *wd)
   * synchronize_srcu on the same SRCU struct, causing a permanent deadlock).
   * Cleanup is deferred to a delayed_work that runs outside the SRCU context.
   */
@@ -31,7 +73,7 @@ index 37ac9b058..7536875d8 100644
  		return 0;
  
  	if (test_and_set_bit(0, &sdcard_cleanup_scheduled))
-@@ -1442,9 +1446,14 @@ static int susfs_handle_sdcard_inode_event(struct fsnotify_mark *mark, u32 mask,
+@@ -2064,9 +2106,14 @@ static int susfs_handle_sdcard_inode_event(struct fsnotify_mark *mark, u32 mask,
  }
  
  static const struct fsnotify_ops fsnotify_ops = {
@@ -47,7 +89,7 @@ index 37ac9b058..7536875d8 100644
  static int add_mark_on_inode(struct inode *inode, u32 mask,
  								struct fsnotify_mark **out)
  {
-@@ -1454,10 +1463,10 @@ static int add_mark_on_inode(struct inode *inode, u32 mask,
+@@ -2076,10 +2123,10 @@ static int add_mark_on_inode(struct inode *inode, u32 mask,
  	if (!m)
  		return -ENOMEM;
  
@@ -60,8 +102,3 @@ index 37ac9b058..7536875d8 100644
  		fsnotify_put_mark(m);
  		return -EINVAL;
  	}
-@@ -1533,4 +1542,3 @@ void susfs_init(void) {\
- 
- /* No module exit is needed becuase it should never be a loadable kernel module */
- //void __init susfs_exit(void)
--
